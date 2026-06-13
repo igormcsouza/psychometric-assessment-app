@@ -41,6 +41,7 @@ jobs:
           mkdir -p package
           cp -R .venv/lib/python3.11/site-packages/. package/
           cp -R app package/
+          cp lambda_function.py package/
           cd package
           zip -r ../backend-lambda.zip .
 
