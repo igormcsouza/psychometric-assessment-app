@@ -4,11 +4,11 @@ import json
 import logging
 import os
 from typing import Final
-from urllib import error, request
+
+from openai import OpenAI, OpenAIError
 
 from app.services.scoring import BIG_FIVE_TRAITS
 
-OPENAI_RESPONSES_URL: Final[str] = "https://api.openai.com/v1/responses"
 DEFAULT_OPENAI_MODEL: Final[str] = "gpt-5.5"
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 15.0
 ALLOWED_BANDS: Final[set[str]] = {"low", "moderate", "high"}
@@ -165,9 +165,9 @@ def _build_json_schema() -> dict[str, object]:
     }
 
 
-def _build_request_body(scores: dict[str, int]) -> bytes:
+def _build_request_payload(scores: dict[str, int]) -> dict[str, object]:
     score_block = "\n".join(f"- {TRAIT_LABELS[trait]}: {scores[trait]}%" for trait in BIG_FIVE_TRAITS)
-    payload = {
+    return {
         "model": _get_openai_model(),
         "reasoning": {"effort": "low"},
         "instructions": (
@@ -188,7 +188,6 @@ def _build_request_body(scores: dict[str, int]) -> bytes:
             "format": _build_json_schema(),
         },
     }
-    return json.dumps(payload).encode("utf-8")
 
 
 def _extract_output_text(response_body: dict[str, object]) -> str:
@@ -274,39 +273,16 @@ def generate_ai_interpretation(scores: dict[str, int]) -> dict[str, object] | No
         logger.debug("OPENAI_API_KEY is not set; using deterministic fallback.")
         return None
 
-    request_body = _build_request_body(scores)
-    http_request = request.Request(
-        OPENAI_RESPONSES_URL,
-        data=request_body,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
+    client = OpenAI(api_key=api_key, timeout=_get_timeout_seconds())
 
     try:
-        with request.urlopen(http_request, timeout=_get_timeout_seconds()) as response:
-            response_body = json.loads(response.read().decode("utf-8"))
-    except error.HTTPError as exc:
-        error_body = exc.read().decode("utf-8", errors="replace")
-        logger.warning(
-            "OpenAI insight request failed with HTTP %s; using deterministic fallback. Body: %s",
-            exc.code,
-            error_body,
-            exc_info=exc,
-        )
-        return None
-    except (error.URLError, TimeoutError, ValueError, OSError, json.JSONDecodeError) as exc:
+        response = client.responses.create(**_build_request_payload(scores))
+    except OpenAIError as exc:
         logger.warning("OpenAI insight request failed; using deterministic fallback.", exc_info=exc)
         return None
 
     try:
-        api_error = response_body.get("error")
-        if isinstance(api_error, dict):
-            raise ValueError(f"OpenAI returned an error response: {api_error}")
-
-        content = _extract_output_text(response_body)
+        content = _extract_output_text(response.model_dump())
         parsed_content = json.loads(content)
         return _validate_ai_interpretation(parsed_content)
     except (ValueError, json.JSONDecodeError) as exc:
