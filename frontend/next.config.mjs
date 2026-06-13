@@ -1,12 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
-  eslint: {
-    ignoreDuringBuilds: true
-  },
-  experimental: {
-    typedRoutes: true
-  }
+  typedRoutes: true
 };
 
 export default nextConfig;

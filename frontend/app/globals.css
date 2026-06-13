@@ -3,6 +3,8 @@
 @tailwind utilities;
 
 :root {
+  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-display: "Space Grotesk", "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --background: 222 47% 98%;
   --foreground: 222 47% 11%;
   --card: 0 0% 100%;
