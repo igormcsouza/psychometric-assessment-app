@@ -1,0 +1,117 @@
+name: Deploy preview
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Deploy backend to Lambda
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+    outputs:
+      backend_public_url: ${{ steps.get_function_url.outputs.backend_public_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Sync backend dependencies
+        working-directory: backend
+        run: uv sync --no-dev
+
+      - name: Package backend
+        working-directory: backend
+        run: |
+          rm -rf package backend-lambda.zip
+          mkdir -p package
+          cp -R .venv/lib/python3.11/site-packages/. package/
+          cp -R app package/
+          cd package
+          zip -r ../backend-lambda.zip .
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Update Lambda code
+        run: |
+          aws lambda update-function-code \
+            --function-name "${{ secrets.AWS_LAMBDA_FUNCTION_NAME }}" \
+            --zip-file fileb://backend/backend-lambda.zip
+
+      - name: Update Lambda env vars
+        run: |
+          aws lambda update-function-configuration \
+            --function-name "${{ secrets.AWS_LAMBDA_FUNCTION_NAME }}" \
+            --environment "Variables={DEBUG=0,OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }},OPENAI_MODEL=${{ secrets.OPENAI_MODEL }},OPENAI_TIMEOUT_SECONDS=${{ secrets.OPENAI_TIMEOUT_SECONDS }}}"
+
+      - name: Get backend public URL
+        id: get_function_url
+        run: |
+          BACKEND_PUBLIC_URL=$(aws lambda get-function-url-config \
+            --function-name "${{ secrets.AWS_LAMBDA_FUNCTION_NAME }}" \
+            --query FunctionUrl \
+            --output text)
+          echo "backend_public_url=$BACKEND_PUBLIC_URL" >> "$GITHUB_OUTPUT"
+
+  frontend:
+    name: Deploy frontend to Vercel
+    runs-on: ubuntu-latest
+    needs: backend
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+
+    env:
+      NEXT_PUBLIC_ASSESSMENT_API_URL: ${{ needs.backend.outputs.backend_public_url }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Pull Vercel project settings
+        working-directory: frontend
+        run: vercel pull --yes --environment=preview --token "$VERCEL_TOKEN"
+
+      - name: Build frontend
+        working-directory: frontend
+        run: vercel build --token "$VERCEL_TOKEN"
+
+      - name: Deploy frontend preview
+        working-directory: frontend
+        run: vercel deploy --prebuilt --yes --token "$VERCEL_TOKEN"

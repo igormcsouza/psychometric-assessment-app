@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 222 47% 98%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 221 83% 53%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 220 14% 96%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 220 14% 96%;
+  --muted-foreground: 215 16% 47%;
+  --accent: 152 81% 96%;
+  --accent-foreground: 160 84% 24%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 221 83% 53%;
+  --radius: 1rem;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-background text-foreground antialiased;
+  font-family: var(--font-sans), sans-serif;
+  min-height: 100vh;
+  background-image:
+    radial-gradient(circle at top left, rgb(59 130 246 / 0.08), transparent 28%),
+    radial-gradient(circle at top right, rgb(16 185 129 / 0.08), transparent 24%),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.75), rgb(255 255 255 / 0.95));
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-display), sans-serif;
+}
+
+::selection {
+  background: rgb(37 99 235 / 0.16);
+}
+
+.noise-grid {
+  background-image:
+    linear-gradient(to right, rgb(148 163 184 / 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(148 163 184 / 0.08) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.glass-panel {
+  @apply border border-white/60 bg-white/85 shadow-soft backdrop-blur-xl;
+}
+
+.focus-ring {
+  @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+}
