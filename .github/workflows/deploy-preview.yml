@@ -17,8 +17,6 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
-    outputs:
-      backend_public_url: ${{ steps.get_function_url.outputs.backend_public_url }}
 
     steps:
       - name: Checkout
@@ -59,59 +57,53 @@ jobs:
             --function-name "${{ secrets.AWS_LAMBDA_FUNCTION_NAME }}" \
             --zip-file fileb://backend/backend-lambda.zip
 
+      - name: Wait for Lambda update to finish
+        run: |
+          for attempt in $(seq 1 30); do
+            status=$(aws lambda get-function-configuration \
+              --function-name "${{ secrets.AWS_LAMBDA_FUNCTION_NAME }}" \
+              --query LastUpdateStatus \
+              --output text)
+
+            if [ "$status" = "Successful" ]; then
+              exit 0
+            fi
+
+            if [ "$status" = "Failed" ]; then
+              echo "Lambda update failed before env vars could be applied."
+              exit 1
+            fi
+
+            echo "Lambda update still in progress (attempt $attempt/30). Waiting..."
+            sleep 5
+          done
+
+          echo "Timed out waiting for Lambda update to finish."
+          exit 1
+
       - name: Update Lambda env vars
         run: |
+          python - <<'PY'
+          import json
+          import os
+
+          payload = {
+              "Variables": {
+                  "DEBUG": "0",
+                  "OPENAI_API_KEY": os.environ["OPENAI_API_KEY"],
+                  "OPENAI_MODEL": os.environ["OPENAI_MODEL"],
+                  "OPENAI_TIMEOUT_SECONDS": os.environ["OPENAI_TIMEOUT_SECONDS"],
+              }
+          }
+
+          with open("backend/lambda-env.json", "w", encoding="utf-8") as file:
+              json.dump(payload, file)
+          PY
+
           aws lambda update-function-configuration \
             --function-name "${{ secrets.AWS_LAMBDA_FUNCTION_NAME }}" \
-            --environment "Variables={DEBUG=0,OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }},OPENAI_MODEL=${{ secrets.OPENAI_MODEL }},OPENAI_TIMEOUT_SECONDS=${{ secrets.OPENAI_TIMEOUT_SECONDS }}}"
-
-      - name: Get backend public URL
-        id: get_function_url
-        run: |
-          BACKEND_PUBLIC_URL=$(aws lambda get-function-url-config \
-            --function-name "${{ secrets.AWS_LAMBDA_FUNCTION_NAME }}" \
-            --query FunctionUrl \
-            --output text)
-          echo "backend_public_url=$BACKEND_PUBLIC_URL" >> "$GITHUB_OUTPUT"
-
-  frontend:
-    name: Deploy frontend to Vercel
-    runs-on: ubuntu-latest
-    needs: backend
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    permissions:
-      contents: read
-
-    env:
-      NEXT_PUBLIC_ASSESSMENT_API_URL: ${{ needs.backend.outputs.backend_public_url }}
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm install
-
-      - name: Install Vercel CLI
-        run: npm install -g vercel@latest
-
-      - name: Pull Vercel project settings
-        working-directory: frontend
-        run: vercel pull --yes --environment=preview --token "$VERCEL_TOKEN"
-
-      - name: Build frontend
-        working-directory: frontend
-        run: vercel build --token "$VERCEL_TOKEN"
-
-      - name: Deploy frontend preview
-        working-directory: frontend
-        run: vercel deploy --prebuilt --yes --token "$VERCEL_TOKEN"
+            --environment file://backend/lambda-env.json
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+          OPENAI_TIMEOUT_SECONDS: ${{ secrets.OPENAI_TIMEOUT_SECONDS }}
