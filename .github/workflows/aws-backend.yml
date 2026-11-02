@@ -1,0 +1,90 @@
+name: AWS backend
+
+# Manual only: deploy brings the backend up, destroy tears it all down.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Deploy or destroy the backend stack
+        type: choice
+        options: [deploy, destroy]
+        default: deploy
+
+concurrency: aws-backend
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: sa-east-1
+  STACK: psychometric-assessment-backend
+
+jobs:
+  deploy:
+    if: inputs.action == 'deploy'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: astral-sh/setup-uv@v3
+      - name: Package backend
+        working-directory: backend
+        run: |
+          uv export --frozen --no-dev --no-hashes --no-emit-project -o requirements.txt
+          uv pip install --python-version 3.11 --python-platform x86_64-manylinux2014 \
+            --target package -r requirements.txt
+          cp -R app lambda_function.py package/
+          (cd package && zip -qr ../backend-lambda.zip .)
+      - name: Create or update stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name "$STACK" \
+            --template-file infra/backend.yaml \
+            --capabilities CAPABILITY_IAM \
+            --no-fail-on-empty-changeset \
+            --tags project=psychometric-assessment \
+            --parameter-overrides \
+              OpenAIApiKey="${{ secrets.OPENAI_API_KEY }}" \
+              OpenAIModel="${{ vars.OPENAI_MODEL || 'gpt-5.5' }}" \
+              OpenAITimeoutSeconds="${{ vars.OPENAI_TIMEOUT_SECONDS || '15' }}"
+      - name: Upload code
+        run: |
+          aws lambda update-function-code --function-name "$STACK" \
+            --zip-file fileb://backend/backend-lambda.zip > /dev/null
+          aws lambda wait function-updated --function-name "$STACK"
+      - name: Summary
+        run: |
+          url=$(aws cloudformation describe-stacks --stack-name "$STACK" \
+            --query 'Stacks[0].Outputs[?OutputKey==`FunctionUrl`].OutputValue' --output text)
+          echo "### Backend deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "Function URL: $url" >> "$GITHUB_STEP_SUMMARY"
+
+  destroy:
+    if: inputs.action == 'destroy'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Delete stack
+        run: |
+          aws cloudformation delete-stack --stack-name "$STACK"
+          aws cloudformation wait stack-delete-complete --stack-name "$STACK"
+      - name: Confirm nothing is left
+        run: |
+          left=0
+          if aws lambda get-function --function-name "$STACK" >/dev/null 2>&1; then
+            echo "Lambda still exists"; left=1
+          fi
+          if [ "$(aws logs describe-log-groups --log-group-name-prefix "/aws/lambda/$STACK" \
+                  --query 'length(logGroups)' --output text)" != 0 ]; then
+            echo "Log group still exists"; left=1
+          fi
+          [ $left = 0 ] && echo "### Backend destroyed, nothing left" >> "$GITHUB_STEP_SUMMARY"
+          exit $left
