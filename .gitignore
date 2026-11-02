@@ -3,3 +3,6 @@ __pycache__/
 frontend/.next/
 frontend/node_modules/
 *.egg-info/
+backend/package/
+backend/backend-lambda.zip
+backend/requirements.txt

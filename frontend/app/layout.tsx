@@ -5,7 +5,10 @@ import { Providers } from "./providers";
 
 export const metadata: Metadata = {
   title: "OCEAN Assessment",
-  description: "A modern Big Five psychometric assessment experience."
+  description: "A modern Big Five psychometric assessment experience.",
+  icons: {
+    icon: "/icon.svg"
+  }
 };
 
 export default function RootLayout({
